@@ -252,7 +252,13 @@ public class MainActivity extends BaseActivity implements GlobalAccountListener,
     @Tdlib.ResolvableProblem int problemType = tdlib.findResolvableProblem();
     BackHeaderButton backButton = navigation.getHeaderView().getBackButton();
     if (problemType != Tdlib.ResolvableProblem.NONE) {
-      backButton.setMenuBadge(ColorId.headerBadgeFailed, animated);
+      @ColorId int colorId;
+      if (problemType == Tdlib.ResolvableProblem.SET_BIRTHDATE) {
+        colorId = ColorId.headerBadge;
+      } else {
+        colorId = ColorId.headerBadgeFailed;
+      }
+      backButton.setMenuBadge(colorId, animated);
     } else {
       TdlibBadgeCounter counter = TdlibManager.instance().getTotalUnreadBadgeCounter(tdlib.accountId());
       if (counter.getCount() > 0) {
@@ -574,7 +580,7 @@ public class MainActivity extends BaseActivity implements GlobalAccountListener,
       case TdApi.AuthorizationStateWaitRegistration.CONSTRUCTOR: {
         TdApi.AuthorizationStateWaitRegistration state = (TdApi.AuthorizationStateWaitRegistration) authState;
         EditNameController c = new EditNameController(this, tdlib);
-        c.setArguments(new EditNameController.Args(EditNameController.MODE_SIGNUP, state, tdlib.authPhoneNumberFormatted()));
+        c.setArguments(new EditNameController.Args(EditNameController.Mode.SIGNUP, state, tdlib.authPhoneNumberFormatted()));
         return c;
       }
       case TdApi.AuthorizationStateWaitPassword.CONSTRUCTOR: {

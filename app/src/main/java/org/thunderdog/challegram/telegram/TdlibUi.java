@@ -14,10 +14,8 @@
  */
 package org.thunderdog.challegram.telegram;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -28,7 +26,6 @@ import android.os.SystemClock;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -54,9 +51,6 @@ import org.thunderdog.challegram.Log;
 import org.thunderdog.challegram.MainActivity;
 import org.thunderdog.challegram.R;
 import org.thunderdog.challegram.U;
-import org.thunderdog.challegram.component.MediaCollectorDelegate;
-import org.thunderdog.challegram.component.attach.MediaLayout;
-import org.thunderdog.challegram.component.attach.MediaLayoutManager;
 import org.thunderdog.challegram.component.base.SettingView;
 import org.thunderdog.challegram.component.chat.MessagesManager;
 import org.thunderdog.challegram.component.popups.ModernActionedLayout;
@@ -66,18 +60,12 @@ import org.thunderdog.challegram.config.Config;
 import org.thunderdog.challegram.core.Background;
 import org.thunderdog.challegram.core.Lang;
 import org.thunderdog.challegram.core.LangUtils;
-import org.thunderdog.challegram.core.Media;
 import org.thunderdog.challegram.data.TD;
 import org.thunderdog.challegram.data.TGBotStart;
 import org.thunderdog.challegram.data.TGMessage;
 import org.thunderdog.challegram.data.TGSwitchInline;
 import org.thunderdog.challegram.data.ThreadInfo;
-import org.thunderdog.challegram.filegen.PhotoGenerationInfo;
-import org.thunderdog.challegram.filegen.SimpleGenerationInfo;
-import org.thunderdog.challegram.loader.ImageGalleryFile;
-import org.thunderdog.challegram.mediaview.AvatarPickerMode;
 import org.thunderdog.challegram.mediaview.MediaViewController;
-import org.thunderdog.challegram.navigation.EditHeaderView;
 import org.thunderdog.challegram.navigation.HeaderView;
 import org.thunderdog.challegram.navigation.NavigationController;
 import org.thunderdog.challegram.navigation.NavigationStack;
@@ -85,7 +73,6 @@ import org.thunderdog.challegram.navigation.SettingsWrap;
 import org.thunderdog.challegram.navigation.SettingsWrapBuilder;
 import org.thunderdog.challegram.navigation.TooltipOverlayView;
 import org.thunderdog.challegram.navigation.ViewController;
-import org.thunderdog.challegram.support.RippleSupport;
 import org.thunderdog.challegram.theme.ColorId;
 import org.thunderdog.challegram.theme.PropertyId;
 import org.thunderdog.challegram.theme.Theme;
@@ -101,7 +88,6 @@ import org.thunderdog.challegram.tool.Intents;
 import org.thunderdog.challegram.tool.Screen;
 import org.thunderdog.challegram.tool.Strings;
 import org.thunderdog.challegram.tool.UI;
-import org.thunderdog.challegram.tool.Views;
 import org.thunderdog.challegram.ui.ChatFolderInviteLinkController;
 import org.thunderdog.challegram.ui.ChatJoinRequestsController;
 import org.thunderdog.challegram.ui.ChatLinkMembersController;
@@ -135,6 +121,7 @@ import org.thunderdog.challegram.ui.SettingsLogOutController;
 import org.thunderdog.challegram.ui.SettingsNotificationController;
 import org.thunderdog.challegram.ui.SettingsPhoneController;
 import org.thunderdog.challegram.ui.SettingsPrivacyController;
+import org.thunderdog.challegram.ui.SettingsPrivacyKeyController;
 import org.thunderdog.challegram.ui.SettingsProxyController;
 import org.thunderdog.challegram.ui.SettingsSessionsController;
 import org.thunderdog.challegram.ui.SettingsThemeController;
@@ -175,7 +162,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import me.vkryl.android.widget.FrameLayoutFix;
 import me.vkryl.core.ArrayUtils;
 import me.vkryl.core.BitwiseUtils;
 import me.vkryl.core.ColorUtils;
@@ -1352,9 +1338,13 @@ public class TdlibUi extends Handler {
       if (user != null) {
         EditNameController c = new EditNameController(context.context(), context.tdlib());
         if (context.tdlib().isSelfUserId(user.id)) {
-          c.setMode(EditNameController.MODE_RENAME_SELF);
+          c.setMode(EditNameController.Mode.RENAME_SELF);
         } else {
-          c.setMode(EditNameController.MODE_RENAME_CONTACT);
+          if (TD.canEditBot(user)) {
+            c.setMode(EditNameController.Mode.RENAME_BOT);
+          } else {
+            c.setMode(EditNameController.Mode.RENAME_CONTACT);
+          }
           c.setUser(user);
         }
         context.navigationController().navigateTo(c);
@@ -1404,7 +1394,7 @@ public class TdlibUi extends Handler {
       return;
     }
     EditNameController controller = new EditNameController(context.context(), context.tdlib());
-    controller.setMode(EditNameController.MODE_ADD_CONTACT);
+    controller.setMode(EditNameController.Mode.ADD_CONTACT);
     controller.setUser(user);
     controller.setKnownPhoneNumber(knownPhoneNumber);
     context.navigationController().navigateTo(controller);
@@ -2363,13 +2353,13 @@ public class TdlibUi extends Handler {
           }*/
           switch (botMode) {
             case BOT_MODE_START: {
-              openChat(context, chat, new ChatOpenParameters().urlOpenParameters(openParameters).shareItem(new TGBotStart(user.id, startArgument, false)).keepStack());
+              openChat(context, chat, new ChatOpenParameters().urlOpenParameters(openParameters).shareItem(new TGBotStart(user.id, startArgument, false, openParameters != null && openParameters.ignoreExplicitUserInteraction)).keepStack());
               break;
             }
             case BOT_MODE_START_IN_GROUP:
             case BOT_MODE_START_GAME: {
               final boolean isGame = botMode == BOT_MODE_START_GAME;
-              addToGroup(context, new TGBotStart(user.id, startArgument, isGame), isGame);
+              addToGroup(context, new TGBotStart(user.id, startArgument, isGame, openParameters != null && openParameters.ignoreExplicitUserInteraction), isGame);
               break;
             }
           }
@@ -2609,7 +2599,7 @@ public class TdlibUi extends Handler {
     public MessageId messageId;
     public String refererUrl, instantViewFallbackUrl, originalUrl;
     public TooltipOverlayView.TooltipBuilder tooltip;
-    public boolean requireOpenPrompt;
+    public boolean requireOpenPrompt, ignoreExplicitUserInteraction;
     public String displayUrl;
 
     private ViewController<?> parentController;
@@ -2626,6 +2616,7 @@ public class TdlibUi extends Handler {
         this.instantViewFallbackUrl = options.instantViewFallbackUrl;
         this.tooltip = options.tooltip;
         this.requireOpenPrompt = options.requireOpenPrompt;
+        this.ignoreExplicitUserInteraction = options.ignoreExplicitUserInteraction;
         this.displayUrl = options.displayUrl;
         this.parentController = options.parentController;
         this.originalUrl = options.originalUrl;
@@ -2701,6 +2692,11 @@ public class TdlibUi extends Handler {
 
     public UrlOpenParameters requireOpenPrompt (boolean requirePrompt) {
       this.requireOpenPrompt = requirePrompt;
+      return this;
+    }
+
+    public UrlOpenParameters ignoreExplicitUserInteraction (boolean ignoreExplicitUserInteraction) {
+      this.ignoreExplicitUserInteraction = ignoreExplicitUserInteraction;
       return this;
     }
 
@@ -7149,5 +7145,152 @@ public class TdlibUi extends Handler {
     );
     recyclerView.addOnScrollListener(onScrollListener);
     return viewMessages;
+  }
+
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({
+    BirthdateOpenOrigin.SUGGESTED_ACTION,
+    BirthdateOpenOrigin.PROFILE,
+    BirthdateOpenOrigin.PRIVACY_SETTINGS
+  })
+  public @interface BirthdateOpenOrigin {
+    int
+      SUGGESTED_ACTION = 0,
+      PROFILE = 1,
+      PRIVACY_SETTINGS = 2;
+  }
+  public void openBirthdateEditor (ViewController<?> context, View view, @BirthdateOpenOrigin int origin) {
+    TdApi.UserFullInfo userFull = tdlib.myUserFull();
+    if (userFull == null)
+      return;
+    TdApi.Birthdate currentBirthdate = userFull.birthdate;
+
+    RunnableData<String> act = hint -> {
+      ViewController.Options.Builder b = new ViewController.Options.Builder();
+      if (origin != BirthdateOpenOrigin.PRIVACY_SETTINGS && !StringUtils.isEmpty(hint)) {
+        b.info(hint);
+      }
+      b.item(new ViewController.OptionItem.Builder()
+        .id(R.id.btn_birthdate)
+        .icon(R.drawable.baseline_date_range_24)
+        .name(currentBirthdate == null ? R.string.MenuBirthdateSet : R.string.MenuBirthdateEdit)
+        .color(currentBirthdate == null ? ViewController.OptionColor.BLUE : ViewController.OptionColor.NORMAL)
+        .build()
+      );
+      if (origin != BirthdateOpenOrigin.PRIVACY_SETTINGS) {
+        b.item(new ViewController.OptionItem.Builder()
+          .id(R.id.btn_privacySettings)
+          .icon(R.drawable.baseline_lock_24)
+          .name(R.string.MenuBirthdatePrivacy)
+          .build());
+      }
+      if (currentBirthdate != null) {
+        b.item(new ViewController.OptionItem.Builder()
+          .id(R.id.btn_delete)
+          .icon(R.drawable.baseline_cancel_24)
+          .color(ViewController.OptionColor.RED)
+          .name(R.string.MenuBirthdateRemove)
+          .build()
+        );
+      }
+      if (origin == BirthdateOpenOrigin.SUGGESTED_ACTION) {
+        b.item(new ViewController.OptionItem.Builder()
+          .id(R.id.btn_suggestion)
+          .icon(R.drawable.baseline_close_24)
+          .name(R.string.ReminderSetBirthdateHide)
+          .color(ViewController.OptionColor.RED)
+          .build());
+      }
+      if (b.itemCount() == 1) {
+        showBirthdatePicker(context, currentBirthdate);
+        return;
+      }
+      context.showOptions(b.build(), (optionItemView, id) -> {
+        if (id == R.id.btn_privacySettings) {
+          SettingsPrivacyKeyController c = new SettingsPrivacyKeyController(context.context(), context.tdlib());
+          c.setArguments(new TdApi.UserPrivacySettingShowBirthdate());
+          context.navigateTo(c);
+        } else if (id == R.id.btn_birthdate) {
+          showBirthdatePicker(context, currentBirthdate);
+        } else if (id == R.id.btn_delete) {
+          context.tdlib().send(new TdApi.SetBirthdate(null), (ok, setError) -> {
+            if (setError != null) {
+              context.runOnUiThreadOptional(() -> {
+                context.showErrorTooltip(view, TD.toErrorString(setError));
+              });
+            }
+          });
+        }
+        return true;
+      });
+    };
+
+    if (origin == BirthdateOpenOrigin.PRIVACY_SETTINGS) {
+      // Skip privacy request
+      act.runWithData(null);
+      return;
+    }
+
+    context.tdlib().send(new TdApi.GetUserPrivacySettingRules(new TdApi.UserPrivacySettingShowBirthdate()), (rules, error) -> context.runOnUiThreadOptional(() -> {
+      if (error != null) {
+        context.showErrorTooltip(view, TD.toErrorString(error));
+        return;
+      }
+      PrivacySettings privacy = PrivacySettings.valueOf(rules);
+      String hint = TD.getPrivacyRulesString(context.tdlib(), TdApi.UserPrivacySettingShowBirthdate.CONSTRUCTOR, privacy);
+      act.runWithData(hint);
+    }));
+  }
+
+  public void showBirthdatePicker (ViewController<?> controller, @Nullable TdApi.Birthdate currentBirthdate) {
+    int day, month, year;
+    if (currentBirthdate != null) {
+      day = currentBirthdate.day;
+      month = currentBirthdate.month - 1;
+      year = currentBirthdate.year;
+    } else {
+      Calendar c = Calendar.getInstance();
+      day = c.get(Calendar.DAY_OF_MONTH);
+      month = c.get(Calendar.MONTH);
+      year = 0;
+    }
+    controller.showCalendarDatePicker(
+      Lang.getString(R.string.BirthdayPopupTitle),
+      Lang.getString(R.string.Save),
+      day,
+      month,
+      year,
+      true,
+      (picker, commitButtonView, newDay, newMonth, newYear) -> {
+        RunnableData<TdApi.Birthdate> setBirthdate = birthdate ->
+          tdlib.send(new TdApi.SetBirthdate(birthdate), (ok, error) -> controller.runOnUiThreadOptional(() -> {
+            if (error != null) {
+              if (picker.hasVisiblePopUp()) {
+                picker.popupLayout().showErrorTooltip(controller, commitButtonView, TD.toErrorString(error));
+              }
+            } else {
+              picker.dismissPopup(true);
+            }
+          }));
+
+        TdApi.Birthdate newBirthdate = new TdApi.Birthdate(newDay, newMonth + 1, newYear);
+        CharSequence str = Lang.getBirthdate(newBirthdate, false, true);
+
+        ViewController.Options options = controller.getOptions(Lang.getStringBold(R.string.SetBirthdateWarning, str),
+          new int[] {R.id.btn_send, R.id.btn_cancel},
+          new String[] {Lang.getString(R.string.SetBirthdateOk), Lang.getString(R.string.Cancel)},
+          new int[] {ViewController.OptionColor.BLUE, ViewController.OptionColor.NORMAL},
+          new int[] {R.drawable.baseline_check_24, R.drawable.baseline_cancel_24}
+        );
+        options.setIgnoreOtherPopUps(true);
+        controller.showOptions(options, (optionItemView, id) -> {
+          if (id == R.id.btn_send) {
+            setBirthdate.runWithData(newBirthdate);
+          }
+          return true;
+        });
+        return false;
+      }
+    );
   }
 }
