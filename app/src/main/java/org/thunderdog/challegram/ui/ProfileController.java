@@ -2363,7 +2363,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
       currentAbout = text;
       if (text != null) {
         // TODO: custom emoji support
-        aboutWrapper = new TextWrapper(tdlib, text, Paints.robotoStyleProvider(16f), TextColorSets.Regular.NORMAL, new TdlibUi.UrlOpenParameters().sourceChat(getChatId()), null);
+        aboutWrapper = new TextWrapper(tdlib, text, Paints.robotoStyleProvider(15f), TextColorSets.Regular.NORMAL, new TdlibUi.UrlOpenParameters().sourceChat(getChatId()), null);
         aboutWrapper.addTextFlags(Text.FLAG_CUSTOM_LONG_PRESS | (Lang.rtl() ? Text.FLAG_ALIGN_RIGHT : 0));
         aboutWrapper.prepare(getTextWidth(Screen.currentWidth()));
       } else {
@@ -3346,7 +3346,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
           new ListItem(ListItem.TYPE_RADIO_OPTION, R.id.btn_hidden, 0, R.string.ChatHistoryHidden, R.id.btn_prehistoryMode, !currentValue)
         })
         .setHeaderItem(headerItem)
-        .setOnSettingItemClick((view, settingsId, item, doneButton, settingsAdapter) -> {
+        .setOnSettingItemClick((view, settingsId, item, doneButton, settingsAdapter, window) -> {
           boolean visible = settingsAdapter.getCheckIntResults().get(R.id.btn_prehistoryMode) == R.id.btn_visible;
           if (groupFull != null && !visible) {
             headerItem.setString(Lang.plural(R.string.ChatHistoryPartiallyHiddenInfo, 100));
