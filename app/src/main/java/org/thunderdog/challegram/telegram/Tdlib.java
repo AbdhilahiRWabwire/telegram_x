@@ -108,8 +108,6 @@ import me.vkryl.core.FileUtils;
 import me.vkryl.core.MathUtils;
 import me.vkryl.core.ObjectUtils;
 import me.vkryl.core.StringUtils;
-import me.vkryl.core.collection.LongList;
-import me.vkryl.core.collection.LongSet;
 import me.vkryl.core.collection.LongSparseIntArray;
 import me.vkryl.core.collection.LongSparseLongArray;
 import me.vkryl.core.lambda.CancellableRunnable;
@@ -465,7 +463,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
   private int chatFolderMaxCount = 10, folderChosenChatMaxCount = 100;
   private int addedShareableChatFolderMaxCount = 2, chatFolderInviteLinkMaxCount = 3;
   private long chatFolderUpdatePeriod = 300; // Seconds
-  private int activeStoryCountMax = 100, weeklySentStoryCountMax = 700,monthlySentStoryCountMax = 3000;
+  private int pinnedStoryCountMax = 3, activeStoryCountMax = 100, weeklySentStoryCountMax = 700,monthlySentStoryCountMax = 3000;
   private boolean canUseTextEntitiesInStoryCaptions;
   private int storyCaptionLengthMax = 2048;
   private int storySuggestedReactionAreaCountMax = 5;
@@ -3763,34 +3761,6 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
     return Td.getSenderUserId(msg);
   }
 
-  public String sponsorName (TdApi.MessageSponsor sponsor) {
-    switch (sponsor.type.getConstructor()) {
-      case TdApi.MessageSponsorTypeBot.CONSTRUCTOR: {
-        TdApi.MessageSponsorTypeBot bot = (TdApi.MessageSponsorTypeBot) sponsor.type;
-        return cache().userName(bot.botUserId);
-      }
-      case TdApi.MessageSponsorTypeWebApp.CONSTRUCTOR: {
-        TdApi.MessageSponsorTypeWebApp webApp = (TdApi.MessageSponsorTypeWebApp) sponsor.type;
-        return webApp.webAppTitle;
-      }
-      case TdApi.MessageSponsorTypePublicChannel.CONSTRUCTOR: {
-        TdApi.MessageSponsorTypePublicChannel publicChannel = (TdApi.MessageSponsorTypePublicChannel) sponsor.type;
-        return chatTitle(publicChannel.chatId);
-      }
-      case TdApi.MessageSponsorTypePrivateChannel.CONSTRUCTOR: {
-        TdApi.MessageSponsorTypePrivateChannel privateChannel = (TdApi.MessageSponsorTypePrivateChannel) sponsor.type;
-        return privateChannel.title;
-      }
-      case TdApi.MessageSponsorTypeWebsite.CONSTRUCTOR: {
-        TdApi.MessageSponsorTypeWebsite website = (TdApi.MessageSponsorTypeWebsite) sponsor.type;
-        return website.name;
-      }
-      default:
-        Td.assertMessageSponsorType_cdabde01();
-        throw Td.unsupported(sponsor.type);
-    }
-  }
-
   public long senderUserId (@NonNull TdApi.MessageSender senderId) {
     switch (senderId.getConstructor()) {
       case TdApi.MessageSenderChat.CONSTRUCTOR: {
@@ -4367,7 +4337,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
       reactionTypes[index] = TD.toReactionType(reactionKey);
       index++;
     }
-    ensureReactionsAvailable(new TdApi.ChatAvailableReactionsSome(reactionTypes), after);
+    ensureReactionsAvailable(new TdApi.ChatAvailableReactionsSome(reactionTypes, 0), after);
   }
 
   public void ensureReactionsAvailable (@NonNull TdApi.AvailableReactions reactions, @Nullable RunnableBool after) {
@@ -4385,7 +4355,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
     for (TdApi.AvailableReaction availableReaction : reactions.popularReactions) {
       reactionTypes.add(availableReaction.type);
     }
-    ensureReactionsAvailable(new TdApi.ChatAvailableReactionsSome(reactionTypes.toArray(new TdApi.ReactionType[0])), after);
+    ensureReactionsAvailable(new TdApi.ChatAvailableReactionsSome(reactionTypes.toArray(new TdApi.ReactionType[0]), 0), after);
   }
 
   public void ensureReactionsAvailable (@NonNull TdApi.ChatAvailableReactions reactions, @Nullable RunnableBool after) {
@@ -5891,6 +5861,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
       false, // TODO transparently request permission & enter flash call
       true,
       false, // TODO check if passed phone number is inserted in the current phone
+      true,  // TODO check current phone number when possible
       false, // TODO for faster login when SMS method is chosen
       firebaseAuthenticationSettings,
       Settings.instance().getAuthenticationTokens()
@@ -8863,6 +8834,11 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
   }
 
   @TdlibThread
+  private void updateReactionNotificationSettings (TdApi.UpdateReactionNotificationSettings update) {
+    listeners.updateReactionNotificationSettings(update);
+  }
+
+  @TdlibThread
   private void onUpdateSavedNotificationSounds (TdApi.UpdateSavedNotificationSounds update) {
     // TODO
   }
@@ -9287,6 +9263,11 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
     );
   }
 
+  @TdlibThread
+  private void updateChatRevenueAmount (TdApi.UpdateChatRevenueAmount update) {
+    listeners.updateChatRevenueAmount(update);
+  }
+
   @AnyThread
   public @Nullable TdApi.ChatTheme chatTheme (String themeName) {
     synchronized (dataLock) {
@@ -9383,6 +9364,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
 
   @TdlibThread
   private void updateOption (ClientHolder context, TdApi.UpdateOption update) {
+    // TODO: separate all fields from Tdlib to some TdlibOptions object.
     final String name = update.name;
 
     if (Log.isEnabled(Log.TAG_TDLIB_OPTIONS)) {
@@ -9567,6 +9549,9 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         this.maxBioLength = Td.intValue(update.value);
         break;
 
+      case "pinned_story_count_max":
+        this.pinnedStoryCountMax = Td.intValue(update.value);
+        break;
       case "active_story_count_max":
         this.activeStoryCountMax = Td.intValue(update.value);
         break;
@@ -10222,6 +10207,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         updateNotificationSettings((TdApi.UpdateScopeNotificationSettings) update);
         break;
       }
+      case TdApi.UpdateReactionNotificationSettings.CONSTRUCTOR: {
+        updateReactionNotificationSettings((TdApi.UpdateReactionNotificationSettings) update);
+        break;
+      }
       case TdApi.UpdateUserPrivacySettingRules.CONSTRUCTOR: {
         updatePrivacySettingRules((TdApi.UpdateUserPrivacySettingRules) update);
         break;
@@ -10436,6 +10425,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         updateChatEmojiStatus((TdApi.UpdateChatEmojiStatus) update);
         break;
       }
+      case TdApi.UpdateChatRevenueAmount.CONSTRUCTOR: {
+        updateChatRevenueAmount((TdApi.UpdateChatRevenueAmount) update);
+        break;
+      }
 
       // File generation
       case TdApi.UpdateFileGenerationStart.CONSTRUCTOR: {
@@ -10471,7 +10464,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         throw Td.unsupported(update);
       }
       default: {
-        Td.assertUpdate_dd796769();
+        Td.assertUpdate_e5cb3327();
         throw Td.unsupported(update);
       }
     }
@@ -11830,7 +11823,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         return true;
       }
       default: {
-        Td.assertSuggestedAction_b50c1148();
+        Td.assertSuggestedAction_96dcb962();
         break;
       }
     }
@@ -11923,7 +11916,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         case TdApi.SuggestedActionSetBirthdate.CONSTRUCTOR:
           return ResolvableProblem.SET_BIRTHDATE;
         default:
-          Td.assertSuggestedAction_b50c1148();
+          Td.assertSuggestedAction_96dcb962();
           throw Td.unsupported(singleAction);
       }
     }
@@ -11959,119 +11952,6 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
 
   public @DrawableRes int chatFolderIconDrawable (TdApi.ChatFolder chatFolder, @DrawableRes int defaultIcon) {
     return TD.findFolderIcon(chatFolderIcon(chatFolder), defaultIcon);
-  }
-
-  public void addChatsToChatFolder (TdlibDelegate delegate, int chatFolderId, long[] chatIds) {
-    if (chatIds.length == 0) {
-      return;
-    }
-    send(new TdApi.GetChatFolder(chatFolderId), (chatFolder, error) -> {
-      if (error != null) {
-        UI.showError(chatFolder);
-      } else {
-        addChatsToChatFolder(delegate, chatFolderId, chatFolder, chatIds);
-      }
-    });
-  }
-
-  public void addChatsToChatFolder (TdlibDelegate delegate, int chatFolderId, TdApi.ChatFolder chatFolder, long[] chatIds) {
-    if (chatIds.length == 0) {
-      return;
-    }
-    LongSet pinnedChatIds = new LongSet(chatFolder.pinnedChatIds);
-    LongSet includedChatIds = new LongSet(chatFolder.includedChatIds);
-    for (long chatId : chatIds) {
-      if (pinnedChatIds.has(chatId) || includedChatIds.has(chatId)) {
-        continue;
-      }
-      includedChatIds.add(chatId);
-    }
-    if (includedChatIds.size() == chatFolder.includedChatIds.length) {
-      return;
-    }
-    int chatCount = pinnedChatIds.size() + includedChatIds.size();
-    int secretChatCount = 0;
-    for (long pinnedChatId : pinnedChatIds) {
-      if (ChatId.isSecret(pinnedChatId)) secretChatCount++;
-    }
-    for (long includedChatId : includedChatIds) {
-      if (ChatId.isSecret(includedChatId)) secretChatCount++;
-    }
-    int nonSecretChatCount = chatCount - secretChatCount;
-    long chosenChatCountMax = tdlib().chatFolderChosenChatCountMax();
-    if (secretChatCount > chosenChatCountMax || nonSecretChatCount > chosenChatCountMax) {
-      if (hasPremium()) {
-        CharSequence text = Lang.getMarkdownString(delegate, R.string.ChatsInFolderLimitReached, chosenChatCountMax);
-        UI.showCustomToast(text, Toast.LENGTH_LONG, 0);
-      } else {
-        send(new TdApi.GetPremiumLimit(new TdApi.PremiumLimitTypeChatFolderChosenChatCount()), (premiumLimit, error) -> {
-          CharSequence text;
-          if (error != null) {
-            text = Lang.getMarkdownString(delegate, R.string.ChatsInFolderLimitReached, chosenChatCountMax);
-          } else {
-            text = Lang.getMarkdownString(delegate, R.string.PremiumRequiredChatsInFolder, premiumLimit.defaultValue, premiumLimit.premiumValue);
-          }
-          UI.showCustomToast(text, Toast.LENGTH_LONG, 0);
-        });
-      }
-      return;
-    }
-    chatFolder.includedChatIds = includedChatIds.toArray();
-    chatFolder.excludedChatIds = ArrayUtils.removeAll(chatFolder.excludedChatIds, chatIds);
-    send(new TdApi.EditChatFolder(chatFolderId, chatFolder), (chatFolderInfo, error) -> {
-      if (error != null) {
-        UI.showError(error);
-      }
-    });
-  }
-
-  public void removeChatFromChatFolder (int chatFolderId, long chatId) {
-    removeChatsFromChatFolder(chatFolderId, new long[] {chatId});
-  }
-
-  public void removeChatsFromChatFolder (int chatFolderId, long[] chatIds) {
-    if (chatIds.length == 0) {
-      return;
-    }
-    send(new TdApi.GetChatFolder(chatFolderId), (chatFolder, error) -> {
-      if (error != null) {
-        UI.showError(error);
-      } else {
-        removeChatsFromChatFolder(chatFolderId, chatFolder, chatIds);
-      }
-    });
-  }
-
-  public void removeChatsFromChatFolder (int chatFolderId, TdApi.ChatFolder chatFolder, long[] chatIds) {
-    if (chatIds.length == 0) {
-      return;
-    }
-    LongList pinnedChatIds = new LongList(chatFolder.pinnedChatIds);
-    LongSet includedChatIds = new LongSet(chatFolder.includedChatIds);
-    LongSet excludedChatIds = new LongSet(chatFolder.excludedChatIds);
-    for (long chatId : chatIds) {
-       boolean removed = pinnedChatIds.remove(chatId) | includedChatIds.remove(chatId);
-       if (removed && Config.CHAT_FOLDERS_SMART_CHAT_DELETION_ENABLED) {
-         TdApi.Chat chat = chat(chatId);
-         boolean isBotChat = isBotChat(chat);
-         boolean isUserChat = isUserChat(chat) && !isBotChat;
-         boolean isContactChat = isUserChat && TD.isContact(chatUser(chat));
-         if (!chatFolder.includeContacts && isUserChat && isContactChat) continue;
-         if (!chatFolder.includeNonContacts && isUserChat && !isContactChat) continue;
-         if (!chatFolder.includeGroups && TD.isMultiChat(chat)) continue;
-         if (!chatFolder.includeChannels && isChannelChat(chat)) continue;
-         if (!chatFolder.includeBots && isBotChat) continue;
-       }
-       excludedChatIds.add(chatId);
-    }
-    chatFolder.pinnedChatIds = pinnedChatIds.get();
-    chatFolder.includedChatIds = includedChatIds.toArray();
-    chatFolder.excludedChatIds = excludedChatIds.toArray();
-    send(new TdApi.EditChatFolder(chatFolderId, chatFolder), (chatFolderInfo, error) -> {
-      if (error != null) {
-        UI.showError(error);
-      }
-    });
   }
 
   public void processChatFolderNewChats (int chatFolderId, long[] addedChatIds, ResultHandler<TdApi.Ok> resultHandler) {
