@@ -34,6 +34,7 @@ import androidx.annotation.UiThread;
 import androidx.collection.LongSparseArray;
 import androidx.collection.SparseArrayCompat;
 import androidx.core.os.CancellationSignal;
+import androidx.core.util.Pair;
 
 import com.google.android.gms.tasks.Task;
 import com.google.android.play.core.integrity.IntegrityManager;
@@ -61,6 +62,7 @@ import org.thunderdog.challegram.data.TD;
 import org.thunderdog.challegram.data.TGMessage;
 import org.thunderdog.challegram.data.TGReaction;
 import org.thunderdog.challegram.emoji.Emoji;
+import org.thunderdog.challegram.emoji.EmojiCodes;
 import org.thunderdog.challegram.filegen.TdlibFileGenerationManager;
 import org.thunderdog.challegram.loader.ImageFile;
 import org.thunderdog.challegram.loader.ImageLoader;
@@ -476,6 +478,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
   private int storySuggestedReactionAreaCountMax = 5;
   private int storyViewersExpirationDelay = 86400;
   private int storyStealhModeCooldownPeriod = 3600, storyStealthModeFuturePeriod = 1500, storyStealthModePastPeriod = 300;
+  private int storyLinkAreaCountMax = 3;
   private int businessIntroTitleLengthMax = 32, businessIntroMessageLengthMax = 70, businessChatLinkCountMax = 100;
   private int
     giveawayBoostCountPerPremium = 4,
@@ -488,6 +491,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
   private int premiumGiftBoostCount = 3, premiumUploadSpeedup = 10, premiumDownloadSpeedup = 10;
   private boolean isPremium, isPremiumAvailable;
   private boolean canWithdrawChatRevenue;
+  private int starWithdrawalCountMin = 1000;
   private @GiftPremiumOption int giftPremiumOptions;
   private boolean suggestOnlyApiStickers;
   private int maxGroupCallParticipantCount = 10000;
@@ -506,7 +510,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
   private String[] diceEmoji, activeEmojiReactions;
   private TdApi.ReactionType defaultReactionType;
   private final Map<String, TGReaction> cachedReactions = new HashMap<>();
-  private boolean callsEnabled = true, expectBlocking, isLocationVisible;
+  private boolean callsEnabled = true, expectBlocking, isLocationVisible, canEditFactCheck;
   private boolean canIgnoreSensitiveContentRestrictions, ignoreSensitiveContentRestrictions;
   private boolean canArchiveAndMuteNewChatsFromUnknownUsers, canSetNewChatPrivacySettings;
   private RtcServer[] rtcServers;
@@ -4240,7 +4244,7 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         return ((TdApi.ReactionTypeEmoji) defaultReactionType).emoji;
       }
     }
-    return "\uD83D\uDC4D"; // Thumbs up
+    return EmojiCodes.THUMBS_UP;
   }
 
   public void ensureEmojiReactionsAvailable (@Nullable RunnableBool after) {
@@ -4841,17 +4845,38 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
     }
   }
 
-  public static final int TESTER_LEVEL_NONE = 0;
-  public static final int TESTER_LEVEL_READER = 1;
-  public static final int TESTER_LEVEL_TESTER = 2;
-  public static final int TESTER_LEVEL_ADMIN = 3;
-  public static final int TESTER_LEVEL_DEVELOPER = 4;
-  public static final int TESTER_LEVEL_CREATOR = 5;
+  @Retention(RetentionPolicy.SOURCE)
+  @IntDef({
+    TesterLevel.NONE,
+    TesterLevel.READER,
+    TesterLevel.TESTER,
+    TesterLevel.TRANSLATOR,
+    TesterLevel.ADMIN,
+    TesterLevel.DEVELOPER,
+    TesterLevel.CREATOR
+  })
+  public @interface TesterLevel {
+    int
+      NONE = 0,
+      READER = 1,
+      TESTER = 2,
+      TRANSLATOR = 3,
+      ADMIN = 4,
+      DEVELOPER = 4,
+      CREATOR = 5;
 
-  public static final int TGX_CREATOR_USER_ID = 163957826;
-  public static final int TDLIB_CREATOR_USER_ID = 7736885;
+    int UNKNOWN = -1;
+
+    int
+      MIN_LEVEL_FOR_DEBUG_DC = TRANSLATOR,
+      MIN_LEVEL_FOR_BATMAN_EFFECT = READER;
+  }
+
+  public static final long TGX_CREATOR_USER_ID = 163957826;
+  public static final long TDLIB_CREATOR_USER_ID = 7736885;
 
   public static final long ADMIN_CHAT_ID = ChatId.fromSupergroupId(1112283549); // TGX Alpha and Admins
+  public static final long TRANSLATORS_CHAT_ID = ChatId.fromSupergroupId(1126790716);
   public static final long TESTER_CHAT_ID = ChatId.fromSupergroupId(1336679475); // Telegram X Android: t.me/tgandroidtests
   public static final long READER_CHAT_ID = ChatId.fromSupergroupId(1136101327); // Telegram X: t.me/tgx_android
   public static final long CLOUD_RESOURCES_CHAT_ID = ChatId.fromSupergroupId(1247387696); // Telegram X: Resources
@@ -4874,51 +4899,54 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
 
   public void getTesterLevel (@NonNull RunnableInt callback, boolean onlyLocal) {
     if (inRecoveryMode() || isDebugInstance()) {
-      callback.runWithInt(TESTER_LEVEL_TESTER);
+      callback.runWithInt(TesterLevel.TESTER);
       return;
     }
     long myUserId = myUserId();
     if (myUserId == TGX_CREATOR_USER_ID) {
-      callback.runWithInt(TESTER_LEVEL_CREATOR);
-    } else if (myUserId == TDLIB_CREATOR_USER_ID) {
-      callback.runWithInt(TESTER_LEVEL_DEVELOPER);
-    } else if (onlyLocal) {
-      TdApi.Chat tgxAdminChat = chat(ADMIN_CHAT_ID);
-      if (tgxAdminChat != null && TD.isMember(chatStatus(ADMIN_CHAT_ID))) {
-        callback.runWithInt(TESTER_LEVEL_ADMIN);
-        return;
+      callback.runWithInt(TesterLevel.CREATOR);
+      return;
+    }
+    if (myUserId == TDLIB_CREATOR_USER_ID) {
+      callback.runWithInt(TesterLevel.DEVELOPER);
+      return;
+    }
+
+    ArrayList<Pair<Long, Integer>> pairs = new ArrayList<>() {{
+      add(new Pair<>(ADMIN_CHAT_ID, TesterLevel.ADMIN));
+      add(new Pair<>(TRANSLATORS_CHAT_ID, TesterLevel.TRANSLATOR));
+      add(new Pair<>(TESTER_CHAT_ID, TesterLevel.TESTER));
+      add(new Pair<>(READER_CHAT_ID, TesterLevel.READER));
+    }};
+
+    if (onlyLocal) {
+      for (Pair<Long, Integer> pair : pairs) {
+        TdApi.Chat chat = chat(pair.first);
+        if (chat != null && TD.isMember(chatStatus(chat.id))) {
+          callback.runWithInt(pair.second);
+          return;
+        }
       }
-      TdApi.Chat tgxTestersChat = chat(TESTER_CHAT_ID);
-      if (tgxTestersChat != null && TD.isMember(chatStatus(TESTER_CHAT_ID))) {
-        callback.runWithInt(TESTER_LEVEL_TESTER);
-        return;
-      }
-      TdApi.Chat tgxReadersChat = chat(READER_CHAT_ID);
-      if (tgxReadersChat != null && TD.isMember(chatStatus(READER_CHAT_ID))) {
-        callback.runWithInt(TESTER_LEVEL_READER);
-        return;
-      }
-      callback.runWithInt(TESTER_LEVEL_NONE);
+      callback.runWithInt(TesterLevel.NONE);
     } else {
-      chat(ADMIN_CHAT_ID, tgxAdminChat -> {
-        if (tgxAdminChat != null && TD.isMember(chatStatus(ADMIN_CHAT_ID))) {
-          callback.runWithInt(TESTER_LEVEL_ADMIN);
-        } else {
-          chat(TESTER_CHAT_ID, tgxTestersChat -> {
-            if (tgxTestersChat != null && TD.isMember(chatStatus(TESTER_CHAT_ID))) {
-              callback.runWithInt(TESTER_LEVEL_TESTER);
+      Runnable act = new Runnable() {
+        @Override
+        public void run () {
+          if (pairs.isEmpty()) {
+            callback.runWithInt(TesterLevel.NONE);
+            return;
+          }
+          Pair<Long, Integer> pair = pairs.remove(0);
+          chat(pair.first, chat -> {
+            if (chat != null && TD.isMember(chatStatus(chat.id))) {
+              callback.runWithInt(pair.second);
             } else {
-              chat(READER_CHAT_ID, tgxReadersChat -> {
-                if (tgxReadersChat != null && TD.isMember(chatStatus(READER_CHAT_ID))) {
-                  callback.runWithInt(TESTER_LEVEL_READER);
-                } else {
-                  callback.runWithInt(TESTER_LEVEL_NONE);
-                }
-              });
+              this.run();
             }
           });
         }
-      });
+      };
+      act.run();
     }
   }
 
@@ -9249,6 +9277,11 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
     listeners.updateChatRevenueAmount(update);
   }
 
+  @TdlibThread
+  private void updateStarRevenueStatus (TdApi.UpdateStarRevenueStatus update) {
+    listeners.updateStarRevenueStatus(update);
+  }
+
   @AnyThread
   public @Nullable TdApi.ChatTheme chatTheme (String themeName) {
     synchronized (dataLock) {
@@ -9582,6 +9615,9 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
       case "story_stealth_mode_past_period":
         this.storyStealthModePastPeriod = Td.intValue(update.value);
         break;
+      case "story_link_area_count_max":
+        this.storyLinkAreaCountMax = Td.intValue(update.value);
+        break;
 
       case "business_start_page_title_length_max":
         this.businessIntroTitleLengthMax = Td.intValue(update.value);
@@ -9627,6 +9663,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         this.canWithdrawChatRevenue = Td.boolValue(update.value);
         break;
 
+      case "star_withdrawal_count_min":
+        this.starWithdrawalCountMin = Td.intValue(update.value);
+        break;
+
       // Service accounts and chats
 
       case "anti_spam_bot_user_id":
@@ -9655,6 +9695,9 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         break;
       case "calls_enabled":
         this.callsEnabled = Td.boolValue(update.value);
+        break;
+      case "can_edit_fact_check":
+        this.canEditFactCheck = Td.boolValue(update.value);
         break;
       case "is_location_visible":
         this.isLocationVisible = Td.boolValue(update.value);
@@ -10450,6 +10493,10 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
         updateChatRevenueAmount((TdApi.UpdateChatRevenueAmount) update);
         break;
       }
+      case TdApi.UpdateStarRevenueStatus.CONSTRUCTOR: {
+        updateStarRevenueStatus((TdApi.UpdateStarRevenueStatus) update);
+        break;
+      }
 
       // File generation
       case TdApi.UpdateFileGenerationStart.CONSTRUCTOR: {
@@ -10480,12 +10527,13 @@ public class Tdlib implements TdlibProvider, Settings.SettingsChangeListener, Da
       case TdApi.UpdateBusinessConnection.CONSTRUCTOR:
       case TdApi.UpdateNewBusinessMessage.CONSTRUCTOR:
       case TdApi.UpdateBusinessMessageEdited.CONSTRUCTOR:
-      case TdApi.UpdateBusinessMessagesDeleted.CONSTRUCTOR: {
+      case TdApi.UpdateBusinessMessagesDeleted.CONSTRUCTOR:
+      case TdApi.UpdateNewBusinessCallbackQuery.CONSTRUCTOR: {
         // Must never come from TDLib. If it does, there's a bug on TDLib side.
         throw Td.unsupported(update);
       }
       default: {
-        Td.assertUpdate_5645426();
+        Td.assertUpdate_8b9cc630();
         throw Td.unsupported(update);
       }
     }

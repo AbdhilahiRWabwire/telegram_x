@@ -2812,7 +2812,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
     return new ListItem(ListItem.TYPE_RADIO_SETTING, R.id.btn_useExplicitDice, 0, R.string.UseExplicitDice).setLongId(Settings.SETTING_FLAG_EXPLICIT_DICE);
   }
 
-  private int testerLevel = -1;
+  private int testerLevel = Tdlib.TesterLevel.UNKNOWN;
 
   private void checkEasterEggs () {
     if (mode != Mode.CHANNEL)
@@ -2820,7 +2820,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
     long chatId = getChatId();
     if (chatId == Tdlib.TRENDING_STICKERS_CHAT_ID && Config.EXPLICIT_DICE_AVAILABLE) {
       int foundIndex = baseAdapter.indexOfViewById(R.id.btn_useExplicitDice);
-      boolean hasEasterEgg = isMember() && testerLevel >= Tdlib.TESTER_LEVEL_READER;
+      boolean hasEasterEgg = isMember() && testerLevel >= Tdlib.TesterLevel.READER;
       boolean hadEasterEgg = foundIndex != -1;
       if (hadEasterEgg != hasEasterEgg) {
         if (hadEasterEgg) {
@@ -2836,14 +2836,12 @@ public class ProfileController extends ViewController<ProfileController.Args> im
           addTopItem(newExplicitDiceItem(), index); // after peer_id, username
         }
       }
-      if (isMember() && testerLevel == -1) {
-        testerLevel = Tdlib.TESTER_LEVEL_NONE;
-        tdlib.getTesterLevel(newTesterLevel -> {
-          if (!isDestroyed()) {
-            testerLevel = newTesterLevel;
-            checkEasterEggs();
-          }
-        });
+      if (isMember() && testerLevel == Tdlib.TesterLevel.UNKNOWN) {
+        testerLevel = Tdlib.TesterLevel.NONE;
+        tdlib.getTesterLevel(newTesterLevel -> runOnUiThreadOptional(() -> {
+          testerLevel = newTesterLevel;
+          checkEasterEggs();
+        }));
       }
     }
   }
@@ -5200,6 +5198,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
     if (headerCell != null && chat != null) {
       headerCell.setUseRedHighlight(tdlib.isRedTeam(chat.id));
       headerCell.setText(tdlib.chatTitle(chat, false), makeSubtitle(false));
+      headerCell.setAllowTitleClick(chat.id);
       headerCell.setEmojiStatus(tdlib.chatUser(chat));
       headerCell.setExpandedSubtitle(makeSubtitle(true));
     }
@@ -5233,6 +5232,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
 
   @Override
   public void onPageScrolled (int position, float positionOffset, int positionOffsetPixels) {
+    positionOffset = ViewPager.clampPositionOffset(positionOffset);
     if (this.checkedBasePosition != position) {
       checkedBasePosition = position;
       checkContentScrollY(position);
